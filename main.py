@@ -106,12 +106,12 @@ def prepare_data(batch_size):
         device = device,
         shuffle=True)
     
-    data_loders = dict()
-    data_loders['train'] = train_iterator
-    data_loders['val'] = valid_iterator
-    data_loders['test'] = test_iterator
+    data_loaders = dict()
+    data_loaders['train'] = train_iterator
+    data_loaders['val'] = valid_iterator
+    data_loaders['test'] = test_iterator
     
-    return SRC, TRG, data_loders
+    return SRC, TRG, data_loaders
 
 def get_network(SRC: Field,
                 TRG: Field,
@@ -148,16 +148,21 @@ def print_model_info(model: nn.Module,
     for var_name in optimizer.state_dict():
         print(var_name, "\t", optimizer.state_dict()[var_name])
 
-def save_model(model: nn.Module):
+def save_model(model: nn.Module,
+               optimizer,
+               epoch: int):
     if not os.path.isdir('ckpt'):
         os.mkdir('ckpt')
+    state = {'epoch' : epoch, 
+            'model' : model.state_dict(),
+            'optimizer' : optimizer.state_dict()}
     now = time.localtime()
     path = 'ckpt/' + f"{now.tm_year}-{now.tm_mon}-{now.tm_mday}_{now.tm_hour}_{now.tm_min}_{now.tm_sec}" + '.pt'
 
-    torch.save(model.state_dict(), path)
+    torch.save(state, path)
 
 def train(model: nn.Module,
-          data_loders: dict,
+          data_loaders: dict,
           criterion,
           optimizer,
           config):
@@ -165,7 +170,7 @@ def train(model: nn.Module,
     
     Args:
         model (nn.Module): transformer model.
-        data_loders (dict): training/validation data iterator.
+        data_loaders (dict): training/validation data iterator.
         criterion : loss function. 
         optimizer : optimizer.
         config (Config): configuration parameters.
@@ -186,7 +191,7 @@ def train(model: nn.Module,
                 
             loss_val_sum = 0
             
-            for batch in data_loders[phase]:
+            for batch in data_loaders[phase]:
                 
                 optimizer.zero_grad()
  
@@ -215,7 +220,47 @@ def train(model: nn.Module,
                     f"epoch:[{epoch+1}/{config.n_epochs}] {phase} cost:[{loss_val_avg:.3f}]"
                 )
     print('training done!!')
-    save_model(model)
+    save_model(model, optimizer, config.n_epochs)
+
+def index_to_sentence(indeces, vocab):
+    """take tokens as index and transrate into string
+
+    Args:
+        indeces (Tensor): token indeces.
+        vocab : vocaburary class.
+
+    Returns:
+        (str): transrated string.
+    """    
+    res = []
+    eos = vocab.stoi['<eos>']
+    for i in indeces:
+        if i == eos:
+            res.append(vocab.itos[i])
+            break
+        else:
+            res.append(vocab.itos[i])
+    return ' '.join(res)
+    
+
+def test_model(model, data_loaders, SRC, TRG):
+    '''print source, target, predicted target.
+    '''
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    model.to(device)
+    
+    for batch in data_loaders['test']:
+        src = batch.src.to(device)
+        trg = batch.trg.to(device)
+        predicted = model.predict(src)
+        
+        for ins in range(predicted.size(0)):
+            print(f'source : {index_to_sentence(src[ins],SRC.vocab)}')
+            print(f'target : {index_to_sentence(trg[ins], TRG.vocab)}')
+            print(f'predic : {index_to_sentence(predicted[ins], TRG.vocab)}')
+            print('*********************************************')
+        
+        # break
 if __name__ == "__main__":
     print("PyTorch version:[%s]." % (torch.__version__))
 
@@ -224,6 +269,7 @@ if __name__ == "__main__":
 
     SRC, TRG, data_loders = prepare_data(config.batch_size)
     model, criterion, optimizer = get_network(SRC, TRG, config)
-    print_model_info(model, optimizer)
+    # print_model_info(model, optimizer)
 
     train(model, data_loders, criterion, optimizer, config)
+    # test_model(model, data_loaders, SRC, TRG)

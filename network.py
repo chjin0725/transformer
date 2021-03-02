@@ -29,9 +29,10 @@ class Transformer(nn.Module):
         
         super().__init__()
 
-        
+        self.config = config
         self.SRC = SRC
         self.TRG = TRG
+        self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         
         self.enc_embedding = nn.Embedding(len(SRC.vocab), 
                                           config.emb_dim,
@@ -45,7 +46,7 @@ class Transformer(nn.Module):
         
         self.linear = nn.Linear(config.emb_dim, len(TRG.vocab))
         
-        self.init_weights()
+#         self.init_weights()
         
     def init_weights(self):
         for name, param in self.named_parameters():
@@ -54,31 +55,36 @@ class Transformer(nn.Module):
                     nn.init.normal_(param.data, mean = 0, std = 0.01)
                 else:
                     nn.init.constant_(param.data, 0)
+
     
-    def generate_mask(self, 
-                      src: torch.LongTensor, 
-                      trg: torch.LongTensor):
+    def generate_causal_mask(self,  
+                             trg: torch.LongTensor):
         '''Generate padding mask and causal mask
         
         Args:
-            src (LongTensor): input to encoder. shape '(batch_size, src_len)'
             trg (LongTensor): input to decoder. shape '(batch_size, trg_len)'
         
         Returns:
-            padding_mask (Tensor): shape '(batch_size, src_len)'
             causal_mask (Tensor): shape '(trg_len, trg_len)'
         '''
-        
-        device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-
-        # padding mask
-        padding_mask = src.eq(self.SRC.vocab.stoi['<pad']).to(device)
-        # causal mask
         tmp = torch.ones(trg.size(1), trg.size(1), dtype = torch.bool)
-#         mask = torch.arange(tmp.size(-1))
-#         causal_mask = tmp.masked_fill_(mask < (mask + 1).view(tmp.size(-1), 1), False).to(device)
-        causal_mask = torch.tril(tmp,-1).transpose(0,1).contiguous().to(device)
-        return padding_mask, causal_mask
+        causal_mask = torch.tril(tmp,-1).transpose(0,1).contiguous().to(self.device)
+        
+        return causal_mask
+    
+    def generate_padding_mask(self, 
+                              src: torch.LongTensor):
+        '''Generate padding mask
+        
+        Args:
+            src (LongTensor): input to encoder. shape '(batch_size, src_len)'
+        
+        Returns:
+            padding_mask (Tensor): shape '(batch_size, src_len)'
+        '''
+        padding_mask = src.eq(self.SRC.vocab.stoi['<pad>']).to(self.device)
+        
+        return padding_mask
     
     def forward(self,
                 src: torch.LongTensor,
@@ -95,7 +101,9 @@ class Transformer(nn.Module):
             enc_dec_attn_weights (list): list of enc-dec attention weights of each Decoder layer.
         '''
         
-        padding_mask, causal_mask = self.generate_mask(src, trg)
+        
+        padding_mask = self.generate_padding_mask(src)
+        causal_mask = self.generate_causal_mask(trg)
         
         encoder_output, encoder_attn_weights = self.encoder(input_indices = src,
                                                             padding_mask = padding_mask)
@@ -108,6 +116,36 @@ class Transformer(nn.Module):
         output = self.linear(decoder_output)
         
         return output, encoder_attn_weights, enc_dec_attn_weights
+    
+    def predict(self,
+                src: torch.LongTensor):
+        '''
+        Args:
+            src (LongTensor): input to encoder. shape '(batch_size, src_len)'
+        
+        Returns:
+            output_tokens (LongTensor): predicted tokens. shape'(batch_size, max_position)'
+        '''
+        padding_mask = self.generate_padding_mask(src)
+        
+        encoder_output, _ = self.encoder(input_indices = src,
+                                         padding_mask = padding_mask)
+        output_tokens = (torch.ones((self.config.batch_size, self.config.max_position))\
+                         * self.TRG.vocab.stoi['<pad>']).long().to(self.device) 
+        ## (batch_size, max_position)
+        output_tokens[:,0] = self.TRG.vocab.stoi['<sos>']
+        for trg_index in range(1, self.config.max_position):
+            trg = output_tokens[:,:trg_index] # (batch_size, trg_index)
+            causal_mask = self.generate_causal_mask(trg) # (trg_index, trg_index)
+            output, _ = self.decoder(input_indices = trg,
+                                             encoder_output = encoder_output,
+                                             enc_dec_attention_padding_mask = padding_mask,
+                                             causal_mask = causal_mask) # (batch_size, trg_index, emb_dim)
+            output = self.linear(output) # (batch_size, trg_index, # trg vocab)
+            output = torch.argmax(output, dim = -1) # (batch_size, trg_index)
+            output_tokens[:,trg_index] = output[:,-1]
+        
+        return output_tokens
 
 class MultiHeadAttention(nn.Module):
     def __init__(self, 
