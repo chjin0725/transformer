@@ -272,4 +272,4 @@ if __name__ == "__main__":
     # print_model_info(model, optimizer)
 
     train(model, data_loders, criterion, optimizer, config)
-    # test_model(model, data_loaders, SRC, TRG)
+    test_model(model, data_loaders, SRC, TRG)
