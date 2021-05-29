@@ -16,3 +16,4 @@ class Config:
     learning_rate: float
     n_epochs: int
     gradient_clip: int
+    is_train: bool
