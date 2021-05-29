@@ -27,3 +27,5 @@ You can specify arguments for Transformer. For example, if you want to specify l
   --gradient_clip: gradient clip value
 ```
 
+# requirments
+You can set requirments with ```pip install -r requirements.txt```
