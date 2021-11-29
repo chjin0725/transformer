@@ -46,15 +46,6 @@ class Transformer(nn.Module):
         
         self.linear = nn.Linear(config.emb_dim, len(TRG.vocab))
         
-#         self.init_weights()
-        
-    def init_weights(self):
-        for name, param in self.named_parameters():
-            if param.requires_grad:
-                if 'weigth' in name:
-                    nn.init.normal_(param.data, mean = 0, std = 0.01)
-                else:
-                    nn.init.constant_(param.data, 0)
 
     
     def generate_causal_mask(self,  
